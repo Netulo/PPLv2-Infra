@@ -1,0 +1,43 @@
+upstream django {
+    server web:8000;
+}
+
+# Przekierowanie z HTTP (80) na HTTPS (443)
+server {
+    listen 80;
+    server_name PLACEHOLDER_DOMAIN;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+
+    server_name PLACEHOLDER_DOMAIN;
+
+    ssl_certificate /etc/nginx/certs/server.crt;
+    ssl_certificate_key /etc/nginx/certs/server.key;
+
+    # Optymalizacja bezpieczeństwa SSL
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    error_page 502 503 504 /502.html;
+    
+    location = /502.html {
+        root /app/staticfiles;
+        internal;
+    }
+
+    location / {
+        proxy_pass http://django;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https; # KRYTYCZNE dla Django przy DEBUG=False
+    }
+
+
+    location /static/ {
+        alias /app/staticfiles/;
+    }
+}

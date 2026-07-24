@@ -1,0 +1,35 @@
+name: Deploy to Local Server
+
+on:
+  repository_dispatch:
+    types: [trigger-deploy] # Nasłuchuje sygnału z pierwszego repo
+  workflow_dispatch: # Pozwala na ręczne kliknięcie "Run workflow" w panelu GitHuba
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    # BŁĄD USUNIĘTY: Brak linijki "needs"
+
+    steps:
+      - name: Logowanie do GitHub Container Registry na serwerze
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wdrażanie gotowego kontenera
+        run: |
+          cd /opt/ppl/PPLv2
+          
+          git fetch origin main
+          git reset --hard origin/main
+          
+          docker compose pull
+          docker compose run --rm web python manage.py migrate
+          docker compose run --rm web python manage.py collectstatic --noinput
+          docker compose run --rm web python manage.py shell -c "from reports.permissions import ensure_report_permissions; ensure_report_permissions()"
+          
+          docker compose up -d
+          docker image prune -a -f
+          docker compose restart nginx
