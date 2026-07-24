@@ -1,0 +1,4 @@
+/backups/
+/nginx/certs/
+.env
+*.env

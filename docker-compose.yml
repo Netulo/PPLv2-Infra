@@ -1,7 +1,6 @@
 services:
   db:
     image: postgres:15
-    # USUNIĘTO PORTS - bezpieczeństwo!
     volumes:
       - postgres_data:/var/lib/postgresql/data
     env_file:
@@ -13,7 +12,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: ghcr.io/netulo/pplv2:latest
+    image: ghcr.io/netulo/pplv2:${APP_VERSION:-stable}
     volumes:
       - static_volume:/app/staticfiles
     env_file:
@@ -35,6 +34,19 @@ services:
     depends_on:
       - web
     restart: unless-stopped
+  
+  watchtower:
+    image: containrrr/watchtower
+    container_name: pplv2_watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro 
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-3600}
+    profiles:
+      - auto-update # Zabezpieczenie - startuje tylko, gdy tego wymusimy
 
 volumes:
   postgres_data:

@@ -364,6 +364,63 @@ module_rodo() {
     fi
 }
 
+module_updates() {
+    msg_header "Zarządzanie Aktualizacjami (Watchtower)"
+    echo "Czy chcesz włączyć automatyczne pobieranie najnowszych wersji systemu z chmury?"
+    echo "Zalecane dla serwerów głównych. Dla laptopów używających limitowanego internetu mobilnego, sugerujemy 'Nie'."
+    read -p "Włącz auto-aktualizacje? [T/n]: " ENABLE_UPDATES < /dev/tty
+
+    # Czyszczenie starych zmiennych w .env w razie nadpisywania konfiguracji
+    sed -i '/COMPOSE_PROFILES/d' "$ENV_FILE"
+    sed -i '/WATCHTOWER_POLL_INTERVAL/d' "$ENV_FILE"
+
+    if [[ "$ENABLE_UPDATES" =~ ^[Nn]$ ]]; then
+        echo "COMPOSE_PROFILES=" >> "$ENV_FILE"
+        msg_info "Automatyczne aktualizacje: WYŁĄCZONE (Wdrażanie ręczne)."
+    else
+        echo "COMPOSE_PROFILES=auto-update" >> "$ENV_FILE"
+        
+        echo -e "\nJak często system ma sprawdzać obecność nowych wersji?"
+        echo "1) Co 5 minut (300s)   - ZALECANE w okresie zapisów (szybkie łatanie błędów)"
+        echo "2) Co 1 godzinę (3600s)- Standardowy tryb działania"
+        echo "3) Co 24 godziny (86400s) - Tryb uśpienia / po pielgrzymce"
+        read -p "Wybierz interwał [1/2/3] (Domyślnie 2): " INTERVAL_CHOICE < /dev/tty
+        
+        case "$INTERVAL_CHOICE" in
+            1)
+                echo "WATCHTOWER_POLL_INTERVAL=300" >> "$ENV_FILE"
+                msg_succ "Aktualizacje WŁĄCZONE. Błyskawiczny interwał: 5 minut."
+                ;;
+            3)
+                echo "WATCHTOWER_POLL_INTERVAL=86400" >> "$ENV_FILE"
+                msg_succ "Aktualizacje WŁĄCZONE. Spokojny interwał: 24 godziny."
+                ;;
+            *)
+                echo "WATCHTOWER_POLL_INTERVAL=3600" >> "$ENV_FILE"
+                msg_succ "Aktualizacje WŁĄCZONE. Standardowy interwał: 1 godzina."
+                ;;
+        esac
+    fi
+}
+
+module_versioning() {
+    msg_header "Kanał Aktualizacji Systemu"
+    echo "1) Wersja STABLE - Stabilna (Zalecane dla większości pielgrzymek)"
+    echo "2) Wersja BETA - Testowa (Najnowszy kod z brancha main, tylko dla macierzystej pielgrzymki)"
+    read -p "Wybierz kanał [1/2] (Domyślnie 1): " VERSION_CHOICE < /dev/tty
+
+    # Czyszczenie starych zmiennych
+    sed -i '/APP_VERSION/d' "$ENV_FILE"
+
+    if [ "$VERSION_CHOICE" == "2" ]; then
+        echo "APP_VERSION=beta" >> "$ENV_FILE"
+        msg_info "Wybrano kanał: BETA"
+    else
+        echo "APP_VERSION=stable" >> "$ENV_FILE"
+        msg_succ "Wybrano kanał: STABLE"
+    fi
+}
+
 module_docker_start() {
     msg_header "Inicjalizacja Środowiska Enterprise (Docker GHCR)"
     read -p "Pobrać i uruchomić system z chmury? [T/n]: " RUN_DOCKER
@@ -400,9 +457,11 @@ module_docker_start() {
 
 module_init
 module_ssl
+module_versioning
 module_network
 module_smtp
 module_database
 module_backups
 module_rodo
+module_updates
 module_docker_start
