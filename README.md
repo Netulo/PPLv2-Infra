@@ -117,7 +117,7 @@ The project uses GitHub Actions for fully automated releases.
 
 1. **Push to `main` branch:** Every change in the main codebase triggers a workflow on GitHub servers.
 2. **Image Build:** GitHub compiles the new version of the application and pushes the ready image to the GHCR registry.
-3. **Auto-Deploy:** Thanks to the installed agent (Self-Hosted Runner), the target server/laptop automatically detects the new version, pulls the image (`docker compose pull`), applies migrations, and seamlessly restarts the application with no noticeable downtime.
+3. **Auto-Deploy:** If auto-updates were enabled during setup (`module_updates`), **Watchtower** polls GHCR on the target server and, when it finds a new image, pulls it and restarts the `web` container. On every container start (including this one), an entrypoint script applies pending database migrations and collects static files before the app starts serving traffic. A cron job also re-runs `docker compose pull && docker compose up -d` on server boot, so a machine that was off catches up on the latest image as soon as it's back online.
 
 ### Manual Update (Optional)
 If for any reason CI/CD fails, the system can be updated manually with a single command in the project folder:

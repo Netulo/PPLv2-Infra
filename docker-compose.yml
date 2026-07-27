@@ -13,6 +13,8 @@ services:
 
   web:
     image: ghcr.io/netulo/pplv2:${APP_VERSION:-stable}
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - static_volume:/app/staticfiles
     env_file:
@@ -42,6 +44,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/.docker/config.json:/config.json:ro 
     environment:
+      - WATCHTOWER_LABEL_ENABLE=true
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_INCLUDE_RESTARTING=true
       - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-3600}

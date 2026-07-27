@@ -120,7 +120,7 @@ Projekt wykorzystuje GitHub Actions do pełnej automatyzacji wydań.
 
 1. **Push do gałęzi `main`:** Każda zmiana w kodzie głównym uruchamia proces na serwerach GitHuba.
 2. **Budowanie obrazu:** GitHub kompiluje nową wersję aplikacji i wysyła gotowy obraz do rejestru GHCR.
-3. **Auto-Deploy:** Dzięki zainstalowanemu agentowi (Self-Hosted Runner), docelowy serwer/laptop automatycznie wykrywa nową wersję, pobiera ważący kilkaset megabajtów obraz (`docker compose pull`), aplikuje migracje i płynnie restartuje aplikację bez zauważalnej przerwy w działaniu.
+3. **Auto-Deploy:** Jeśli auto-aktualizacje zostały włączone podczas instalacji (`module_updates`), **Watchtower** odpytuje GHCR na docelowym serwerze i po wykryciu nowego obrazu pobiera go oraz restartuje kontener `web`. Przy każdym starcie kontenera (również tym) skrypt startowy aplikuje oczekujące migracje bazy danych i zbiera pliki statyczne, zanim aplikacja zacznie obsługiwać ruch. Zadanie cron uruchamiane po restarcie serwera ponownie wykonuje `docker compose pull && docker compose up -d`, dzięki czemu maszyna, która była wyłączona, po ponownym uruchomieniu sama dociąga najnowszy obraz.
 
 ### Ręczna aktualizacja (Opcjonalnie)
 Jeżeli z jakiegoś powodu CI/CD nie zadziała, system można zaktualizować ręcznie jedną komendą w folderze projektu:
