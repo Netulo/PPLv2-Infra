@@ -49,19 +49,22 @@ else
     exit 1
 fi
 
-# 6. Klonowanie najnowszych plików konfiguracyjnych i skryptów (z uwierzytelnieniem)
+# 6. Klonowanie repozytorium infrastruktury (docker-compose.yml, nginx, skrypty)
+#    Uwaga: to repo instalacyjne (PPLv2-Infra), NIE repo aplikacji (PPLv2-App) -
+#    kod aplikacji nigdy nie musi trafić na serwer, bo web startuje z gotowego
+#    obrazu ghcr.io/netulo/pplv2.
 INSTALL_DIR="/opt/ppl/PPLv2"
 echo -e "${GREEN}[4/5] Pobieranie struktury plików do ${INSTALL_DIR}...${NC}"
 
 if [ -d "$INSTALL_DIR" ]; then
     echo -e "${YELLOW} -> Katalog już istnieje. Aktualizuję pliki...${NC}"
     cd "$INSTALL_DIR"
-    git remote set-url origin "https://${GIT_USER}:${GIT_TOKEN}@github.com/Netulo/PPLv2.git"
+    git remote set-url origin "https://github.com/Netulo/PPLv2-Infra.git"
     git fetch origin main
     git reset --hard origin/main >/dev/null
 else
-    echo -e "${YELLOW} -> Pobieranie repozytorium...${NC}"
-    git clone "https://${GIT_USER}:${GIT_TOKEN}@github.com/Netulo/PPLv2.git" "$INSTALL_DIR" >/dev/null
+    echo -e "${YELLOW} -> Pobieranie repozytorium infrastruktury...${NC}"
+    git clone "https://github.com/Netulo/PPLv2-Infra.git" "$INSTALL_DIR" >/dev/null
 fi
 
 # 7. Płynne przejście do kreatora środowiska
@@ -70,5 +73,4 @@ cd "$INSTALL_DIR"
 chmod +x scripts/setup.sh
 
 echo -e "${BLUE}======================================================${NC}"
-# Wywołanie Twojego skryptu setup.sh (który za chwilę dostosujemy)
-./scripts/setup.sh
+./scripts/setup.sh < /dev/tty

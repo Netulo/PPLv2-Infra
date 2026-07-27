@@ -508,7 +508,11 @@ module_apply() {
 
     if [ "$do_pull" == "--pull" ]; then
         msg_info "Pobieranie obrazów..."
-        docker compose pull
+        if ! docker compose pull; then
+            msg_err "Pobieranie obrazów nie powiodło się - przerwano (kontenery NIE zostały zrestartowane)."
+            msg_warn "Sprawdź: czy 'docker login ghcr.io' jest wykonane dla użytkownika, który to uruchamia (uwaga: root i zwykły użytkownik mają OSOBNE dane logowania), oraz czy token ma uprawnienie 'read:packages'."
+            return 1
+        fi
     fi
 
     msg_info "Restart kontenerów..."
@@ -527,7 +531,11 @@ module_docker_start() {
     fi
 
     msg_info "Pobieranie najnowszych obrazów z rejestru..."
-    docker compose pull
+    if ! docker compose pull; then
+        msg_err "Pobieranie obrazów nie powiodło się - przerwano."
+        msg_warn "Sprawdź: czy 'docker login ghcr.io' jest wykonane dla użytkownika, który to uruchamia (uwaga: root i zwykły użytkownik mają OSOBNE dane logowania), oraz czy token ma uprawnienie 'read:packages'."
+        return 1
+    fi
 
     msg_info "Uruchamianie kontenerów..."
     docker compose up -d
