@@ -58,6 +58,59 @@ During installation, the system will ask for key environment parameters:
 
 ---
 
+## 🌱 Initial Data (Deployment Starterpack)
+
+After `migrate` and `createsuperuser`, seed the location-specific reference
+data — parishes/cities, duties, occupations, registration/service prices,
+RBAC roles, and system settings — with a single idempotent command run
+inside the `web` container:
+
+```bash
+docker compose exec web python manage.py init_starterpack --profile <slug>
+```
+
+### Deployment profiles
+Every pilgrimage location is different — different parishes, a different
+duty roster, sometimes different participant categories (occupations) with
+different registration fees. This is captured per-location in the **app
+repo** (`PPLv2-App`), under `pilgrims/fixtures/deployments/<slug>/`:
+* `parishes.csv` — `city,parish,additional_information`
+* `duties.csv` — `name,sort_order`
+* `occupations.csv` — `name,registration_price`
+
+`--profile` defaults to `default` (a working example profile shipped in the
+app repo). To stand up a new location, copy that folder to a new slug and
+edit the three CSVs, then run `init_starterpack --profile <slug>`. All
+three files are additive-only — rerunning after editing them never deletes
+existing rows, so it's safe to run repeatedly as the list grows across a
+season.
+
+### Migrating parishes/cities from an old database backup
+If you have a legacy database export (the CSVs the historic
+`import_pilgrims` migration command reads), convert its Parish/City lists
+into the new format instead of retyping them by hand:
+
+```bash
+docker compose exec web python manage.py export_legacy_parishes \
+  --cities /path/to/bck_parishCities_*.csv \
+  --parishes /path/to/bck_parishes_*.csv \
+  --out pilgrims/fixtures/deployments/<slug>/parishes.csv
+```
+This command only reads/writes files — it never touches the database — so
+review the generated CSV before running `init_starterpack`.
+
+### What's universal vs. per-location
+* **Per-location** (from the CSVs above): parishes/cities, duties,
+  occupations and their registration fee.
+* **Universal, identical on every deployment**: RBAC roles, "system" prices
+  (meals, accommodation, vehicle pass, baggage, discounts — only their
+  *default amount* differs, editable afterward in the pricing admin), and
+  system settings (editable afterward in the settings admin). These are
+  seeded automatically by `init_starterpack` and never need a per-deployment
+  file.
+
+---
+
 ## 🔄 Continuous Deployment and Updates (CI/CD)
 
 The project uses GitHub Actions for fully automated releases.

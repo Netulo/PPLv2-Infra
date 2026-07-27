@@ -60,6 +60,60 @@ Podczas instalacji system zapyta o kluczowe parametry środowiska:
 
 ---
 
+## 🌱 Dane Początkowe (Starterpack Wdrożeniowy)
+
+Po `migrate` i `createsuperuser` należy zaseedować dane początkowe
+specyficzne dla lokalizacji — parafie/miasta, służby, zawody/statusy,
+cennik wpisowego i usług, role RBAC oraz ustawienia systemowe — jedną,
+idempotentną komendą uruchamianą w kontenerze `web`:
+
+```bash
+docker compose exec web python manage.py init_starterpack --profile <nazwa>
+```
+
+### Profile wdrożenia
+Każda lokalizacja pielgrzymki jest inna — inne parafie, inny skład służb,
+czasem inne kategorie uczestników (zawody) z innymi opłatami wpisowymi.
+Dane te są przechowywane per-lokalizacja w repozytorium aplikacji
+(`PPLv2-App`), w katalogu `pilgrims/fixtures/deployments/<nazwa>/`:
+* `parishes.csv` — `city,parish,additional_information`
+* `duties.csv` — `name,sort_order`
+* `occupations.csv` — `name,registration_price`
+
+`--profile` domyślnie to `default` (przykładowy, działający profil
+dołączony do repozytorium aplikacji). Aby uruchomić nową lokalizację,
+skopiuj ten folder pod nową nazwą i zmodyfikuj trzy pliki CSV, a następnie
+uruchom `init_starterpack --profile <nazwa>`. Wszystkie trzy pliki są
+wyłącznie dopisywalne (additive-only) — ponowne uruchomienie po edycji
+nigdy nie usuwa istniejących wpisów, więc komendę można bezpiecznie
+uruchamiać wielokrotnie w miarę uzupełniania listy w trakcie sezonu.
+
+### Migracja parafii/miast ze starego backupu bazy danych
+Jeśli masz eksport ze starej bazy danych (pliki CSV odczytywane przez
+historyczną komendę migracyjną `import_pilgrims`), przekonwertuj listę
+Parafii/Miast do nowego formatu zamiast przepisywać ją ręcznie:
+
+```bash
+docker compose exec web python manage.py export_legacy_parishes \
+  --cities /sciezka/do/bck_parishCities_*.csv \
+  --parishes /sciezka/do/bck_parishes_*.csv \
+  --out pilgrims/fixtures/deployments/<nazwa>/parishes.csv
+```
+Komenda wyłącznie czyta/zapisuje pliki — nigdy nie dotyka bazy danych —
+więc przejrzyj wynikowy plik CSV przed uruchomieniem `init_starterpack`.
+
+### Co jest uniwersalne, a co per-lokalizacja
+* **Per-lokalizacja** (z powyższych CSV): parafie/miasta, służby,
+  zawody/statusy wraz z ich opłatą wpisową.
+* **Uniwersalne, identyczne dla każdego wdrożenia**: role RBAC, ceny
+  "systemowe" (wyżywienie, noclegi, przepustki samochodowe, bagaż, zniżki —
+  różni się tylko domyślna *kwota*, edytowalna później w panelu cennika)
+  oraz ustawienia systemowe (edytowalne później w panelu ustawień). Są one
+  zaseedowane automatycznie przez `init_starterpack` i nigdy nie wymagają
+  osobnego pliku per wdrożenie.
+
+---
+
 ## 🔄 Ciągłe Wdrażanie i Aktualizacje (CI/CD)
 
 Projekt wykorzystuje GitHub Actions do pełnej automatyzacji wydań.
