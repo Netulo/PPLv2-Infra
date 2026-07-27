@@ -54,6 +54,19 @@ services:
       # supports - check `docker version --format '{{.Server.APIVersion}}'`
       # on the host if this ever needs bumping.
       - DOCKER_API_VERSION=1.40
+      # E-mail przy udanej/nieudanej aktualizacji - opcjonalne. Wyłączone
+      # domyślnie (puste WATCHTOWER_NOTIFICATIONS = bez zmian w zachowaniu).
+      # Włącz ustawiając w .env: WATCHTOWER_NOTIFICATIONS=email oraz
+      # WATCHTOWER_NOTIFICATION_EMAIL_TO=<adres>. Reszta korzysta z tego
+      # samego SMTP, co reszta aplikacji.
+      - WATCHTOWER_NOTIFICATIONS=${WATCHTOWER_NOTIFICATIONS:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_FROM=${DEFAULT_FROM_EMAIL:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_TO=${WATCHTOWER_NOTIFICATION_EMAIL_TO:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER=${EMAIL_HOST:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT=${EMAIL_PORT:-587}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER=${EMAIL_HOST_USER:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD=${EMAIL_HOST_PASSWORD:-}
+      - WATCHTOWER_NOTIFICATION_EMAIL_DELAY=2
     profiles:
       - auto-update # Zabezpieczenie - startuje tylko, gdy tego wymusimy
 
