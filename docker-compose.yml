@@ -48,6 +48,12 @@ services:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_INCLUDE_RESTARTING=true
       - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-3600}
+      # containrrr/watchtower's bundled Docker client defaults to an old API
+      # version (1.25); newer Docker Engine daemons reject that outright
+      # ("client version too old"). Pin it to what the host actually
+      # supports - check `docker version --format '{{.Server.APIVersion}}'`
+      # on the host if this ever needs bumping.
+      - DOCKER_API_VERSION=1.40
     profiles:
       - auto-update # Zabezpieczenie - startuje tylko, gdy tego wymusimy
 
