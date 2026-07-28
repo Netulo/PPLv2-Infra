@@ -31,6 +31,18 @@ services:
       - db
       - redis
     restart: unless-stopped
+    # Without this, `docker compose ps` can't tell "still starting/running
+    # migrations" or "crash-looping in entrypoint.sh" apart from "up and
+    # serving requests" - all three show as some flavor of "Up". Any real
+    # HTTP response (even an error one) counts as healthy; a connection
+    # failure means gunicorn was never reached. start_period is generous
+    # since migrations run before gunicorn ever starts.
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
   nginx:
     image: nginx:latest

@@ -641,8 +641,13 @@ module_versioning() {
     CURRENT_VERSION=$(get_env_var APP_VERSION)
     [ -n "$CURRENT_VERSION" ] && msg_info "Obecny kanał: $CURRENT_VERSION"
 
-    echo "1) STABLE (stabilny tag)"
-    echo "2) BETA (tag z najnowszym commit z main)"
+    echo "1) STABLE - dla serwerów produkcyjnych. Aktualizuje się WYŁĄCZNIE gdy"
+    echo "   ktoś świadomie wyda nowy tag (np. v1.2.0) w repo PPLv2-App - Watchtower"
+    echo "   nigdy nie wdroży niesprawdzonej zmiany na produkcję."
+    echo "2) BETA - dla serwerów testowych. Śledzi każdy push na main w PPLv2-App"
+    echo "   bez żadnej bramki - Watchtower wdroży to, co jest na main, gdy tylko"
+    echo "   się pojawi. Sporadyczne awarie po aktualizacji to tu oczekiwane"
+    echo "   zachowanie (to właśnie po to jest serwer testowy), nie błąd instalacji."
     read -p "Wybierz kanał [1/2] (Domyślnie 1): " VERSION_CHOICE < /dev/tty
 
     if [ "$VERSION_CHOICE" == "2" ]; then
