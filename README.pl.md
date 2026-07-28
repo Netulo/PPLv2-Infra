@@ -148,6 +148,21 @@ Wszystkie usługi zarządzane są przez narzędzie Docker Compose. Główne kome
 ## 💾 Kopie Zapasowe i Retencja
 
 Podczas instalacji kreator konfiguruje zadania CRON bezpośrednio w systemie operacyjnym:
-* **Inteligentny Backup:** Kopia zapasowa bazy danych tworzona jest codziennie w nocy w folderze `./backups`. Jeśli skonfigurowano moduł Cloud, kopia wysyłana jest dodatkowo do Google Cloud Storage.
+* **Inteligentny Backup:** Kopia zapasowa bazy danych tworzona jest codziennie w nocy w folderze `./backups` (bind-mount z kontenera `web` do katalogu instalacyjnego, dzięki czemu przetrwa redeploy i auto-aktualizację). Jeśli skonfigurowano moduł Cloud, kopia wysyłana jest dodatkowo do Google Cloud Storage.
 * **RODO Cleanup:** Skrypt cyklicznie usuwa dane osobowe pielgrzymów starsze niż zdefiniowany czas retencji (domyślnie 3 lata), zachowując zgodność ze standardami księgowymi.
 * **Czyszczenie sesji:** Regularne usuwanie wygasłych tokenów dostępu
+
+Potrzebujesz kopii na pendrive/dysku zewnętrznym (np. przed ryzykowną
+operacją)? Uruchom `scripts/export_backups.sh <ścieżka>` (lub opcję 12 w
+menu) - czyta bezpośrednio z folderu `./backups` na hoście, bo ścieżka
+pendrive'a nie jest widoczna z wnętrza kontenera `web`.
+
+**Klucze szyfrujące (`.env`) są backupowane osobno, ręcznie - celowo.**
+`CRYPTOGRAPHY_KEY`/`PESEL_HASH_KEY` odszyfrowują każde pole PII w powyższych
+backupach bazy danych - gdyby kopia `.env` trafiła w to samo miejsce co te
+backupy, ktoś kto ukradnie jedną lokalizację dostałby od razu zaszyfrowane
+dane i klucz do ich odczytania. Zaraz po tym, jak setup wygeneruje te klucze,
+uruchom `scripts/export_env_backup.sh <ścieżka>` (lub opcję 11 w menu
+`setup.sh`) i przechowuj wynik gdzieś, gdzie pipeline backupów bazy danych
+nie ma dostępu (menedżer haseł, sejf, oddzielne konto w chmurze) - nigdy w
+tym samym bucketcie GCS ani na tym samym dysku.

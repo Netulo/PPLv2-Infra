@@ -104,6 +104,28 @@ module_init() {
         msg_succ "Wygenerowano nowy klucz."
     fi
     set_env_var SECRET_KEY "$SECRET_KEY"
+
+    # CRYPTOGRAPHY_KEY/PESEL_HASH_KEY protect PII at rest - unlike SECRET_KEY,
+    # there is deliberately no "regenerate?" prompt for these: changing either
+    # one after real data exists makes that data permanently unreadable
+    # (encrypted fields can't be decrypted, PESEL hash lookups stop matching).
+    # Generate once on first install, then always keep silently.
+    NEW_KEYS_GENERATED=false
+    if [ -z "$(get_env_var CRYPTOGRAPHY_KEY)" ]; then
+        set_env_var CRYPTOGRAPHY_KEY "$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 50)"
+        msg_succ "Wygenerowano CRYPTOGRAPHY_KEY (klucz szyfrowania danych osobowych)."
+        NEW_KEYS_GENERATED=true
+    fi
+    if [ -z "$(get_env_var PESEL_HASH_KEY)" ]; then
+        set_env_var PESEL_HASH_KEY "$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 50)"
+        msg_succ "Wygenerowano PESEL_HASH_KEY (klucz haszowania numerów PESEL)."
+        NEW_KEYS_GENERATED=true
+    fi
+    if [ "$NEW_KEYS_GENERATED" = true ]; then
+        msg_warn "WAŻNE: Zrób teraz bezpieczną kopię .env (opcja 11 w menu, lub 'scripts/export_env_backup.sh <ścieżka>')."
+        msg_warn "Przechowuj ją GDZIE INDZIEJ niż backupy bazy danych - w przeciwnym razie ktoś, kto ukradnie"
+        msg_warn "jedno miejsce (np. bucket GCS), ukradnie też klucz do odszyfrowania wszystkich danych osobowych."
+    fi
 }
 
 # Renders nginx/default.conf from the template using the host/domain choice
@@ -740,6 +762,8 @@ show_menu() {
     echo " 8) Retencja danych (RODO)"
     echo " 9) Automatyczne aktualizacje (Watchtower)"
     echo "10) Zastosuj zmiany / restart kontenerów"
+    echo "11) Backup kluczy .env (ODDZIELNIE od backupów bazy danych)"
+    echo "12) Eksport backupów bazy danych na pendrive/dysk zewnętrzny"
     echo " 0) Wyjście"
     read -p "Wybierz opcję: " menu_choice < /dev/tty
 
@@ -754,6 +778,14 @@ show_menu() {
         8) module_rodo; module_apply ;;
         9) module_updates; module_apply --pull ;;
         10) module_apply --pull ;;
+        11)
+            read -p "Ścieżka docelowa (NIE ta sama co backupy bazy danych): " env_backup_dest < /dev/tty
+            bash scripts/export_env_backup.sh "$env_backup_dest"
+            ;;
+        12)
+            read -p "Ścieżka docelowa (pendrive/dysk zewnętrzny): " backups_export_dest < /dev/tty
+            bash scripts/export_backups.sh "$backups_export_dest"
+            ;;
         0) msg_info "Zakończono bez zmian."; exit 0 ;;
         *) msg_err "Nieznana opcja."; exit 1 ;;
     esac

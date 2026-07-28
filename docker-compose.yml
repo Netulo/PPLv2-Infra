@@ -17,6 +17,14 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - static_volume:/app/staticfiles
+      # Bind mount (not a named volume) so BACKUP_DIR (django-dbbackup's
+      # local dump target, default /app/backups) lands directly in the
+      # install directory on the host - without this, local backups live
+      # only in the container's writable layer and are silently lost every
+      # time the container is recreated (Watchtower auto-update, a manual
+      # redeploy, `docker compose up -d` after a new image), which also
+      # makes DBBACKUP_CLEANUP_KEEP's "14 most recent" retention meaningless.
+      - ./backups:/app/backups
     env_file:
       - .env
     depends_on:

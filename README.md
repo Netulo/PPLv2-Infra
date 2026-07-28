@@ -145,6 +145,21 @@ All services are managed via Docker Compose. Main commands (executed in the `/op
 ## 💾 Backups and Retention
 
 During installation, the wizard configures CRON tasks directly in the operating system:
-* **Smart Backup:** A database backup is created daily at night in the `./backups` folder. If the Cloud module is configured, the copy is additionally uploaded to Google Cloud Storage.
+* **Smart Backup:** A database backup is created daily at night in the `./backups` folder (bind-mounted from the `web` container to the install directory, so it survives redeploys and auto-updates). If the Cloud module is configured, the copy is additionally uploaded to Google Cloud Storage.
 * **GDPR Cleanup:** A script periodically removes personal data of pilgrims older than the defined retention time (default 3 years), maintaining compliance with accounting standards.
 * **Session Cleanup:** Regular removal of expired access tokens.
+
+Need a copy on a USB drive/external disk (e.g. before a risky operation)?
+Run `scripts/export_backups.sh <destination>` (or menu option 12) — it reads
+directly from the host's `./backups` folder, since a USB mount point isn't
+visible from inside the `web` container.
+
+**Encryption keys (`.env`) are backed up separately, manually, on purpose.**
+`CRYPTOGRAPHY_KEY`/`PESEL_HASH_KEY` decrypt every PII field in the database
+backups above — if a copy of `.env` ever ended up in the same place as those
+backups, anyone who stole that one location would get both the encrypted
+data and the key to read it. Right after setup generates these keys, run
+`scripts/export_env_backup.sh <destination>` (or menu option 11 in
+`setup.sh`) and store the result somewhere the database backup pipeline has
+no access to (password manager, safe, separate storage account) — never the
+same GCS bucket or drive.
