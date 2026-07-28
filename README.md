@@ -46,13 +46,13 @@ The system utilizes an "Enterprise Deploy" model. The source code is not built o
 Paste the following command in the terminal on a new machine. The script will install Docker, prepare the environment, and launch the configuration wizard:
 
 ```bash
-curl -sSL https://gist.githubusercontent.com/Netulo/2b9e92f8096049d665552c9cca90b366/raw/bootstrap.sh?v=3 -o /tmp/bootstrap.sh && sudo bash /tmp/bootstrap.sh
+BOOTSTRAP_SCRIPT=$(mktemp) && curl -sSL https://raw.githubusercontent.com/Netulo/PPLv2-Infra/main/scripts/bootstrap.sh -o "$BOOTSTRAP_SCRIPT" && sudo bash "$BOOTSTRAP_SCRIPT"
 ```
 
 ### What does the wizard (`setup.sh`) do?
 During installation, the system will ask for key environment parameters:
 * **Network Security:** Choice between a public server (requires a domain name) and a laptop on the road. In field mode, the system automatically configures mDNS (Avahi), making the application available on the local network at `machine-name.local` and `ppl.local`.
-* **SSL Certificates:** Automatic generation of self-signed certificates for secure local connections (HTTPS).
+* **SSL Certificates:** Field mode gets a self-signed certificate for local HTTPS. Public-domain mode automatically requests and renews a real, browser-trusted certificate from Let's Encrypt (falls back to self-signed if issuance ever fails, e.g. DNS not pointed at the server yet).
 * **Database:** Option to choose a local PostgreSQL container or connect to an external database (in which case the local container is automatically disabled).
 * **Automation (Cron):** Installation of scripts for clearing expired sessions, executing backups, and enforcing the GDPR data retention policy.
 

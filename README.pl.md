@@ -48,13 +48,13 @@ System wykorzystuje model "Enterprise Deploy". Kod źródłowy nie jest budowany
 Wklej poniższą komendę w terminalu na nowej maszynie. Skrypt zainstaluje Dockera, przygotuje środowisko i uruchomi kreator konfiguracji:
 
 ```bash
-curl -sSL https://gist.githubusercontent.com/Netulo/2b9e92f8096049d665552c9cca90b366/raw/bootstrap.sh?v=3 -o /tmp/bootstrap.sh && sudo bash /tmp/bootstrap.sh
+BOOTSTRAP_SCRIPT=$(mktemp) && curl -sSL https://raw.githubusercontent.com/Netulo/PPLv2-Infra/main/scripts/bootstrap.sh -o "$BOOTSTRAP_SCRIPT" && sudo bash "$BOOTSTRAP_SCRIPT"
 ```
 
 ### Co robi kreator (`setup.sh`)?
 Podczas instalacji system zapyta o kluczowe parametry środowiska:
 * **Zabezpieczenia sieciowe:** Wybór między serwerem publicznym (wymaga podania domeny) a laptopem w trasie. W trybie trasy system automatycznie konfiguruje mDNS (Avahi), dzięki czemu aplikacja będzie dostępna w sieci lokalnej pod adresem `nazwa-komputera.local` oraz `ppl.local`.
-* **Certyfikaty SSL:** Automatyczne generowanie certyfikatów self-signed dla bezpiecznych połączeń lokalnych (HTTPS).
+* **Certyfikaty SSL:** Tryb trasy dostaje certyfikat self-signed dla lokalnego HTTPS. Tryb domeny publicznej automatycznie żąda i odnawia prawdziwy certyfikat zaufany przez przeglądarki z Let's Encrypt (w razie niepowodzenia wydania - np. domena jeszcze nie wskazuje na serwer - zostaje na self-signed).
 * **Baza Danych:** Możliwość wyboru lokalnego kontenera PostgreSQL lub podpięcia zewnętrznej bazy (wtedy lokalny kontener jest automatycznie wygaszany).
 * **Automatyzacja (Cron):** Instalacja skryptów czyszczących stare sesje, wykonujących backupy oraz realizujących politykę retencji danych RODO.
 

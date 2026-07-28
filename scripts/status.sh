@@ -18,9 +18,13 @@ msg_succ()   { echo -e "${GREEN} [OK] $1${NC}"; }
 msg_warn()   { echo -e "${YELLOW} [!] $1${NC}"; }
 msg_err()    { echo -e "${RED} [ERR] $1${NC}"; }
 
+STATUS_FETCH_ERR=$(mktemp)
+STATUS_WEB_ERR=$(mktemp)
+trap 'rm -f "$STATUS_FETCH_ERR" "$STATUS_WEB_ERR"' EXIT
+
 msg_header "Repo PPLv2-Infra"
 if git rev-parse --git-dir > /dev/null 2>&1; then
-    if git fetch origin --quiet 2>/tmp/status_fetch_err; then
+    if git fetch origin --quiet 2>"$STATUS_FETCH_ERR"; then
         LOCAL=$(git rev-parse HEAD)
         REMOTE=$(git rev-parse origin/main 2>/dev/null || echo "$LOCAL")
         if [ "$LOCAL" == "$REMOTE" ]; then
@@ -31,18 +35,18 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
         fi
     else
         msg_err "git fetch nie powiódł się:"
-        cat /tmp/status_fetch_err
+        cat "$STATUS_FETCH_ERR"
     fi
 else
     msg_warn "To nie jest checkout git - nie da się porównać z GitHub."
 fi
 
 msg_header "Obraz aplikacji (web)"
-if docker compose exec -T web python manage.py buildinfo 2>/tmp/status_web_err; then
+if docker compose exec -T web python manage.py buildinfo 2>"$STATUS_WEB_ERR"; then
     :
 else
     msg_err "Nie udało się odpytać kontenera web:"
-    cat /tmp/status_web_err
+    cat "$STATUS_WEB_ERR"
 fi
 
 msg_header "Watchtower"
@@ -58,5 +62,3 @@ if docker ps --filter "name=pplv2_watchtower" --filter "status=running" -q | gre
 else
     msg_err "Kontener NIE działa (sprawdź COMPOSE_PROFILES=auto-update w .env i uruchom: docker compose up -d watchtower)"
 fi
-
-rm -f /tmp/status_fetch_err /tmp/status_web_err
