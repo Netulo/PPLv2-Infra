@@ -2,3 +2,4 @@
 /nginx/certs/
 .env
 *.env
+CLAUDE.md
