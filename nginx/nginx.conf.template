@@ -1,8 +1,16 @@
-# Przekierowanie z HTTP (80) na HTTPS (443)
+# Przekierowanie z HTTP (80) na HTTPS (443), z wyjątkiem wyzwania Let's
+# Encrypt (ACME HTTP-01), które musi być obsłużone na zwykłym HTTP.
 server {
     listen 80;
     server_name PLACEHOLDER_DOMAIN;
-    return 301 https://$host$request_uri;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
 server {
@@ -10,15 +18,19 @@ server {
 
     server_name PLACEHOLDER_DOMAIN;
 
-    ssl_certificate /etc/nginx/certs/server.crt;
-    ssl_certificate_key /etc/nginx/certs/server.key;
+    ssl_certificate PLACEHOLDER_SSL_CERT;
+    ssl_certificate_key PLACEHOLDER_SSL_KEY;
 
     # Optymalizacja bezpieczeństwa SSL
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
     error_page 502 503 504 /502.html;
-    
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
     location = /502.html {
         root /app/staticfiles;
         internal;
@@ -39,7 +51,12 @@ server {
         proxy_pass http://$upstream_web;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Overwritten, not appended ($proxy_add_x_forwarded_for) - Django's
+        # SessionTrackingMiddleware and django-axes lockout trust this header
+        # as the real client IP with no further validation, so a client
+        # supplying its own X-Forwarded-For must not be able to inject a
+        # fake leading IP ahead of the real one.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https; # KRYTYCZNE dla Django przy DEBUG=False
     }
 

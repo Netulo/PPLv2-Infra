@@ -32,6 +32,7 @@ set_env_var() {
     local key="$1"
     local value="$2"
     touch "$ENV_FILE"
+    chmod 600 "$ENV_FILE" # .env holds SECRET_KEY/DB/SMTP passwords - never world-readable
     if grep -q "^${key}=" "$ENV_FILE"; then
         awk -v k="$key" -v v="$value" -F'=' '$1==k{print k"="v; next}{print}' "$ENV_FILE" > "${ENV_FILE}.tmp" && mv "${ENV_FILE}.tmp" "$ENV_FILE"
     else
@@ -67,9 +68,11 @@ module_init() {
     if [ -f "$ENV_FILE" ]; then
         BACKUP_ENV="${ENV_FILE}.backup_$(date +%Y%m%d_%H%M%S)"
         cp "$ENV_FILE" "$BACKUP_ENV"
+        chmod 600 "$BACKUP_ENV" # backup contains the same secrets as .env
         msg_info "Wykryto istniejący plik $ENV_FILE. Kopia zapasowa: $BACKUP_ENV"
     else
         echo "# Wygenerowano: $(date)" > "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
     fi
 
     CURRENT_DEBUG=$(get_env_var DEBUG)
@@ -103,8 +106,34 @@ module_init() {
     set_env_var SECRET_KEY "$SECRET_KEY"
 }
 
-module_ssl() {
-    msg_header "Certyfikaty SSL"
+# Renders nginx/default.conf from the template using the host/domain choice
+# (module_network) and the certificate paths (module_ssl) already persisted
+# in .env. Must run after both have set their values at least once - falls
+# back to safe defaults with a warning if either is still missing.
+render_nginx_config() {
+    local server_name cert_path key_path
+    server_name=$(get_env_var NGINX_SERVER_NAME)
+    cert_path=$(get_env_var SSL_CERT_PATH)
+    key_path=$(get_env_var SSL_KEY_PATH)
+
+    if [ -z "$server_name" ]; then
+        msg_warn "Brak skonfigurowanego hosta/domeny (uruchom najpierw opcję 4 - Sieć/domena) - używam tymczasowo 'localhost'."
+        server_name="localhost"
+    fi
+    if [ -z "$cert_path" ] || [ -z "$key_path" ]; then
+        cert_path="/etc/nginx/certs/server.crt"
+        key_path="/etc/nginx/certs/server.key"
+    fi
+
+    msg_info "Aktualizacja konfiguracji Nginx..."
+    sed -e "s#PLACEHOLDER_DOMAIN#$server_name#g" \
+        -e "s#PLACEHOLDER_SSL_CERT#$cert_path#g" \
+        -e "s#PLACEHOLDER_SSL_KEY#$key_path#g" \
+        nginx/nginx.conf.template > nginx/default.conf
+    msg_succ "Konfiguracja Nginx zaktualizowana."
+}
+
+module_ssl_selfsigned() {
     mkdir -p nginx/certs
     if [ ! -f nginx/certs/server.crt ]; then
         msg_info "Generowanie certyfikatów self-signed..."
@@ -114,8 +143,104 @@ module_ssl() {
           -subj "/C=PL/ST=PPL/L=Trasa/O=PPL_Server/CN=localhost" 2>/dev/null
         msg_succ "Certyfikaty zapisane w nginx/certs/."
     else
-        msg_succ "Certyfikaty są gotowe, pomijam. (Usuń nginx/certs/server.crt, aby wygenerować nowe.)"
+        msg_succ "Certyfikaty self-signed już istnieją, pomijam. (Usuń nginx/certs/server.crt, aby wygenerować nowe.)"
     fi
+}
+
+# Requests/renews the real Let's Encrypt certificate via the HTTP-01 webroot
+# challenge. Requires nginx to already be running and serving
+# /.well-known/acme-challenge/ from the shared certbot_www volume (true once
+# module_docker_start has done `docker compose up -d`, or on any later
+# re-run against an already-deployed install) - never call this before that.
+# Safe to call repeatedly: certbot skips re-issuing a still-valid certificate.
+issue_letsencrypt_cert() {
+    local domain email
+    domain=$(get_env_var DOMAIN_NAME)
+    email=$(get_env_var LETSENCRYPT_EMAIL)
+
+    if [ -z "$domain" ] || [ -z "$email" ]; then
+        msg_err "Brak domeny lub e-maila do Let's Encrypt - pomijam wydanie certyfikatu."
+        return 1
+    fi
+
+    msg_info "Żądanie certyfikatu Let's Encrypt dla $domain..."
+    if docker compose run --rm certbot certonly \
+        --webroot -w /var/www/certbot \
+        -d "$domain" --email "$email" --agree-tos --no-eff-email --non-interactive; then
+        msg_succ "Certyfikat Let's Encrypt gotowy dla $domain."
+        set_env_var SSL_CERT_PATH "/etc/letsencrypt/live/$domain/fullchain.pem"
+        set_env_var SSL_KEY_PATH "/etc/letsencrypt/live/$domain/privkey.pem"
+        render_nginx_config
+        docker compose exec -T nginx nginx -s reload 2>/dev/null || true
+        register_certbot_renewal_cron
+        return 0
+    else
+        msg_err "Wydanie certyfikatu Let's Encrypt nie powiodło się - serwer zostaje na certyfikacie self-signed."
+        msg_warn "Najczęstsze przyczyny: domena $domain jeszcze nie wskazuje na ten serwer (sprawdź rekord DNS A/AAAA), port 80 zablokowany przez firewall/router, albo limit Let's Encrypt (5 wydań/tydzień na domenę)."
+        msg_warn "Popraw DNS/firewall, a następnie uruchom ponownie opcję '2) Certyfikaty SSL' z menu."
+        return 1
+    fi
+}
+
+register_certbot_renewal_cron() {
+    msg_info "Rejestrowanie odnawiania certyfikatu w cron..."
+    CRON_CERTBOT_CMD="30 3 * * * cd $(pwd) && docker compose run --rm certbot renew --webroot -w /var/www/certbot --quiet && docker compose exec -T nginx nginx -s reload > /dev/null 2>&1"
+    (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "$CRON_CERTBOT_CMD") | crontab -
+    msg_succ "Zadanie odnawiania certyfikatu Let's Encrypt dodane do crontab (codziennie o 3:30)."
+}
+
+# Only meaningful after module_docker_start has brought nginx up at least
+# once - called from the menu (re-runs) and from module_docker_start itself
+# (first install).
+maybe_issue_letsencrypt_cert() {
+    if [ "$(get_env_var SSL_MODE)" == "letsencrypt" ]; then
+        issue_letsencrypt_cert
+    fi
+}
+
+module_ssl() {
+    msg_header "Certyfikaty SSL"
+    local env_type domain
+
+    # A self-signed cert is always kept on hand, even in Let's Encrypt mode:
+    # it's what nginx serves as the *initial* certificate before the ACME
+    # challenge can succeed (nginx must already be listening on 443 with a
+    # valid cert for the HTTP-01 flow in issue_letsencrypt_cert to run), and
+    # it's the automatic fallback if issuance/renewal ever fails.
+    module_ssl_selfsigned
+
+    env_type=$(get_env_var ENV_TYPE)
+    domain=$(get_env_var DOMAIN_NAME)
+
+    if [ "$env_type" == "2" ] && [ -n "$domain" ]; then
+        msg_info "Tryb: Let's Encrypt (domena publiczna: $domain)."
+        read -p "Adres e-mail do powiadomień Let's Encrypt (wygasanie certyfikatu itp.): " LE_EMAIL < /dev/tty
+        if [ -z "$LE_EMAIL" ]; then
+            msg_err "E-mail jest wymagany przez Let's Encrypt. Zostaję na certyfikacie self-signed."
+            set_env_var SSL_MODE selfsigned
+            unset_env_var LETSENCRYPT_EMAIL
+        else
+            set_env_var SSL_MODE letsencrypt
+            set_env_var LETSENCRYPT_EMAIL "$LE_EMAIL"
+            msg_info "Prawdziwy certyfikat zostanie wydany automatycznie po uruchomieniu kontenerów (wymaga, aby domena $domain wskazywała już na ten serwer)."
+        fi
+    else
+        set_env_var SSL_MODE selfsigned
+        unset_env_var LETSENCRYPT_EMAIL
+    fi
+
+    # In selfsigned mode, or in letsencrypt mode before a real cert has ever
+    # been issued, nginx serves the self-signed cert. But if a real cert was
+    # already issued for this domain (re-running this module against an
+    # already-working deployment), keep pointing at it - don't flip nginx
+    # back to self-signed and force an avoidable restart/flicker; the
+    # renewal check in maybe_issue_letsencrypt_cert handles keeping it fresh.
+    CURRENT_CERT_PATH=$(get_env_var SSL_CERT_PATH)
+    if [ "$(get_env_var SSL_MODE)" != "letsencrypt" ] || [[ "$CURRENT_CERT_PATH" != "/etc/letsencrypt/live/"* ]]; then
+        set_env_var SSL_CERT_PATH "/etc/nginx/certs/server.crt"
+        set_env_var SSL_KEY_PATH "/etc/nginx/certs/server.key"
+    fi
+    render_nginx_config
 }
 
 module_network() {
@@ -126,6 +251,7 @@ module_network() {
     echo "1) Środowisko lokalne / offline (localhost + IP LAN)"
     echo "2) Serwer docelowy (domena publiczna)"
     read -p "Wybierz typ środowiska [1/2]: " ENV_TYPE < /dev/tty
+    set_env_var ENV_TYPE "$ENV_TYPE"
 
     NGINX_SERVER_NAME=""
 
@@ -134,8 +260,10 @@ module_network() {
         DOMAIN_NAME=${DOMAIN_NAME:-$CURRENT_HOSTS}
         set_env_var ALLOWED_HOSTS "$DOMAIN_NAME"
         set_env_var CSRF_TRUSTED_ORIGINS "https://$DOMAIN_NAME"
+        set_env_var DOMAIN_NAME "$DOMAIN_NAME"
         NGINX_SERVER_NAME="$DOMAIN_NAME"
     else
+        unset_env_var DOMAIN_NAME
         CURRENT_LOCAL_IP=$(echo "$CURRENT_HOSTS" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)
         read -p "Podaj lokalny adres IP z Wi-Fi (np. 192.168.1.15)${CURRENT_LOCAL_IP:+ [obecnie: $CURRENT_LOCAL_IP]} [ENTER = pomiń]: " LOCAL_IP < /dev/tty
         LOCAL_IP=${LOCAL_IP:-$CURRENT_LOCAL_IP}
@@ -158,9 +286,8 @@ module_network() {
         msg_info "Przypisano mDNS: $MDNS_NAME"
     fi
 
-    msg_info "Aktualizacja konfiguracji Nginx..."
-    sed "s/PLACEHOLDER_DOMAIN/$NGINX_SERVER_NAME/g" nginx/nginx.conf.template > nginx/default.conf
-    msg_succ "Konfiguracja sieciowa zakończona."
+    set_env_var NGINX_SERVER_NAME "$NGINX_SERVER_NAME"
+    msg_succ "Konfiguracja sieciowa zakończona. (Certyfikat/nginx zostaną zaktualizowane w kroku 'Certyfikaty SSL'.)"
 }
 
 module_smtp() {
@@ -183,10 +310,12 @@ module_smtp() {
     EMAIL_USER=${EMAIL_USER:-$CURRENT_USER}
 
     if [ -n "$CURRENT_PASS" ]; then
-        read -p "Hasło SMTP jest już ustawione [ENTER = zachowaj, lub podaj nowe]: " EMAIL_PASS
+        read -sp "Hasło SMTP jest już ustawione [ENTER = zachowaj, lub podaj nowe]: " EMAIL_PASS
+        echo ""
         EMAIL_PASS=${EMAIL_PASS:-$CURRENT_PASS}
     else
-        read -p "Hasło SMTP: " EMAIL_PASS
+        read -sp "Hasło SMTP: " EMAIL_PASS
+        echo ""
     fi
 
     read -p "Nadawca (np. System <system@domena.pl>)${CURRENT_FROM:+ [obecnie: $CURRENT_FROM]}: " EMAIL_FROM
@@ -234,10 +363,12 @@ module_database() {
 
         CURRENT_EXT_PASS=$(get_env_var POSTGRES_PASSWORD)
         if [ -n "$CURRENT_EXT_PASS" ]; then
-            read -p "Hasło zewnętrznej bazy jest już ustawione [ENTER = zachowaj, lub podaj nowe]: " EXT_DB_PASS
+            read -sp "Hasło zewnętrznej bazy jest już ustawione [ENTER = zachowaj, lub podaj nowe]: " EXT_DB_PASS
+            echo ""
             EXT_DB_PASS=${EXT_DB_PASS:-$CURRENT_EXT_PASS}
         else
-            read -p "Hasło zewnętrznej bazy: " EXT_DB_PASS
+            read -sp "Hasło zewnętrznej bazy: " EXT_DB_PASS
+            echo ""
         fi
 
         set_env_var DB_HOST "$EXT_DB_HOST"
@@ -361,8 +492,16 @@ EOF
         CURRENT_CRON_HOUR=$(crontab -l 2>/dev/null | grep "run_smart_backup" | awk '{print $2}')
         read -p "Godzina uruchomienia (0-23) [ENTER = ${CURRENT_CRON_HOUR:-3}]: " cron_hour
         cron_hour=${cron_hour:-${CURRENT_CRON_HOUR:-3}}
+        if ! [[ "$cron_hour" =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then
+            msg_warn "Błędna godzina. Ustawiono domyślną (3)."
+            cron_hour=3
+        fi
         read -p "Częstotliwość w dniach [ENTER = 1]: " cron_days
         cron_days=${cron_days:-1}
+        if ! [[ "$cron_days" =~ ^[0-9]+$ ]] || [ "$cron_days" -lt 1 ]; then
+            msg_warn "Błędna częstotliwość. Ustawiono domyślną (1 dzień)."
+            cron_days=1
+        fi
 
         if [ "$cron_days" == "1" ]; then
             cron_day_expr="*"
@@ -517,6 +656,14 @@ module_apply() {
 
     msg_info "Restart kontenerów..."
     docker compose up -d
+
+    # `docker compose up -d` alone doesn't make an already-running nginx
+    # container pick up changes to the bind-mounted nginx/default.conf (only
+    # an image/env/volume-list change triggers a recreate) - reload
+    # explicitly so network/SSL menu changes actually take effect. Harmless
+    # no-op if nginx isn't running yet (e.g. this is the very first run).
+    docker compose exec -T nginx nginx -s reload 2>/dev/null || true
+
     msg_succ "Gotowe. Migracje i pliki statyczne zostaną zastosowane automatycznie przy starcie kontenera web."
 }
 
@@ -540,6 +687,12 @@ module_docker_start() {
     msg_info "Uruchamianie kontenerów..."
     docker compose up -d
 
+    if [ "$(get_env_var SSL_MODE)" == "letsencrypt" ]; then
+        msg_info "Oczekiwanie na start nginx przed żądaniem certyfikatu Let's Encrypt..."
+        sleep 3
+        issue_letsencrypt_cert
+    fi
+
     msg_info "Oczekiwanie na inicjalizację bazy..."
     sleep 5
 
@@ -560,9 +713,9 @@ module_docker_start() {
 
 run_full_setup() {
     module_init
+    module_network
     module_ssl
     module_versioning
-    module_network
     module_smtp
     module_database
     module_backups
@@ -592,9 +745,9 @@ show_menu() {
 
     case "$menu_choice" in
         1) run_full_setup ;;
-        2) module_ssl; module_apply ;;
+        2) module_ssl; module_apply; maybe_issue_letsencrypt_cert ;;
         3) module_versioning; module_apply --pull ;;
-        4) module_network; module_apply ;;
+        4) module_network; module_ssl; module_apply; maybe_issue_letsencrypt_cert ;;
         5) module_smtp; module_apply ;;
         6) module_database; module_apply ;;
         7) module_backups; module_apply ;;

@@ -33,10 +33,25 @@ services:
       - ./nginx:/etc/nginx/conf.d
       - ./nginx/certs:/etc/nginx/certs
       - static_volume:/app/staticfiles
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
     depends_on:
       - web
     restart: unless-stopped
-  
+
+  # No long-running process - invoked on demand via `docker compose run --rm
+  # certbot ...` for initial issuance (setup.sh's module_ssl) and renewal
+  # (the cron entry registered by register_certbot_renewal_cron). It's still
+  # listed as a normal service (not profile-gated) so `docker compose run`
+  # works without extra flags; expect it to show as "Exited (0)" right after
+  # every `docker compose up -d` - that's expected, not a crash, it just has
+  # nothing to do outside of an explicit `run`.
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+
   watchtower:
     image: containrrr/watchtower
     container_name: pplv2_watchtower
@@ -73,3 +88,5 @@ services:
 volumes:
   postgres_data:
   static_volume:
+  certbot_conf:
+  certbot_www:
