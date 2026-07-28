@@ -1,7 +1,3 @@
-upstream django {
-    server web:8000;
-}
-
 # Przekierowanie z HTTP (80) na HTTPS (443)
 server {
     listen 80;
@@ -29,7 +25,18 @@ server {
     }
 
     location / {
-        proxy_pass http://django;
+        # `web` is a container hostname, not a stable IP - Docker recreates
+        # it (new IP) on every deploy/restart (Watchtower, manual redeploy,
+        # etc.). A plain `upstream { server web:8000; }` block only resolves
+        # that hostname once, at nginx startup, and then nginx keeps
+        # retrying the stale IP forever - a persistent 502 until nginx is
+        # restarted. Using a variable here forces per-request resolution via
+        # Docker's embedded DNS (127.0.0.11), honoring the short TTL below,
+        # so nginx picks up a recreated container within seconds instead of
+        # needing a manual restart.
+        resolver 127.0.0.11 valid=10s;
+        set $upstream_web web:8000;
+        proxy_pass http://$upstream_web;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
