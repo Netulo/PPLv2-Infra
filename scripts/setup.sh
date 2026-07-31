@@ -159,11 +159,31 @@ module_ssl_selfsigned() {
     mkdir -p nginx/certs
     if [ ! -f nginx/certs/server.crt ]; then
         msg_info "Generowanie certyfikatów self-signed..."
+        # Browsers have ignored the CN field for validation since ~2017 and
+        # require a matching Subject Alternative Name instead - without SAN
+        # entries here, the cert fails hostname validation no matter which
+        # of localhost/127.0.0.1/mDNS-name/LAN-IP the browser was actually
+        # pointed at (even after the cert is manually trusted). Build the
+        # SAN list from NGINX_SERVER_NAME (set by module_network, which
+        # always runs before this) so every way this box is reachable is
+        # covered; fall back to localhost if it's somehow still unset.
+        local server_name entry san_entries=""
+        server_name=$(get_env_var NGINX_SERVER_NAME)
+        server_name=${server_name:-localhost}
+        for entry in $server_name; do
+            if [[ "$entry" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                san_entries="${san_entries}IP:$entry,"
+            else
+                san_entries="${san_entries}DNS:$entry,"
+            fi
+        done
+        san_entries=${san_entries%,}
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
           -keyout nginx/certs/server.key \
           -out nginx/certs/server.crt \
-          -subj "/C=PL/ST=PPL/L=Trasa/O=PPL_Server/CN=localhost" 2>/dev/null
-        msg_succ "Certyfikaty zapisane w nginx/certs/."
+          -subj "/C=PL/ST=PPL/L=Trasa/O=PPL_Server/CN=localhost" \
+          -addext "subjectAltName=$san_entries" 2>/dev/null
+        msg_succ "Certyfikaty zapisane w nginx/certs/ (SAN: $san_entries)."
     else
         msg_succ "Certyfikaty self-signed już istnieją, pomijam. (Usuń nginx/certs/server.crt, aby wygenerować nowe.)"
     fi
