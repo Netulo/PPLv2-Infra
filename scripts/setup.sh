@@ -343,6 +343,29 @@ module_network() {
             NGINX_SERVER_NAME="$NGINX_SERVER_NAME $LOCAL_IP"
         fi
 
+        # Anything else this box needs to be reachable as (Tailscale
+        # MagicDNS name, a second LAN alias, etc.) belongs here rather than
+        # a hand-edit of .env afterwards - a manual edit has no guardrail
+        # against ALLOWED_HOSTS' comma convention and NGINX_SERVER_NAME's
+        # space convention silently diverging (that mismatch once broke
+        # self-signed cert generation for days without anyone noticing).
+        # Pre-fill with whatever's already in ALLOWED_HOSTS today, minus the
+        # entries this function manages itself, so re-running the wizard
+        # doesn't drop a previously-added extra host.
+        CURRENT_EXTRA_HOSTS=$(echo "$CURRENT_HOSTS" | tr ',' '\n' | grep -v '^$' | grep -vxF -e "localhost" -e "127.0.0.1" -e "$MDNS_NAME" ${CURRENT_LOCAL_IP:+-e "$CURRENT_LOCAL_IP"} | tr '\n' ' ' | sed 's/ *$//')
+        read -p "Dodatkowe nazwy hosta (np. Tailscale MagicDNS), oddzielone spacją${CURRENT_EXTRA_HOSTS:+ [obecnie: $CURRENT_EXTRA_HOSTS]} [ENTER = pomiń]: " EXTRA_HOSTS < /dev/tty
+        EXTRA_HOSTS=${EXTRA_HOSTS:-$CURRENT_EXTRA_HOSTS}
+        if [ -n "$EXTRA_HOSTS" ]; then
+            # Accept commas too (easy to type out of habit) and normalize to
+            # both conventions here, once, instead of leaving that to a
+            # future manual .env edit.
+            for extra in ${EXTRA_HOSTS//,/ }; do
+                HOSTS="$HOSTS,$extra"
+                TRUSTED="$TRUSTED,https://$extra,http://$extra"
+                NGINX_SERVER_NAME="$NGINX_SERVER_NAME $extra"
+            done
+        fi
+
         set_env_var ALLOWED_HOSTS "$HOSTS"
         set_env_var CSRF_TRUSTED_ORIGINS "$TRUSTED"
         msg_info "Przypisano mDNS: $MDNS_NAME"
