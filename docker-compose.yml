@@ -65,6 +65,20 @@ services:
     depends_on:
       - web
     restart: unless-stopped
+    # nginx only reads cert/config files from disk at startup and on an
+    # explicit reload - if a file backing them (e.g. nginx/certs/server.crt)
+    # disappears afterwards, a running nginx keeps serving fine off its old
+    # in-memory copy and gives no signal anything is wrong until the next
+    # unrelated restart finally tries to reopen it (this bit us once
+    # already). `nginx -t` re-validates config *and* re-opens every
+    # referenced cert/key file each interval, so that condition now flips
+    # this container to "unhealthy" right away instead of staying silent.
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # No long-running process - invoked on demand via `docker compose run --rm
   # certbot ...` for initial issuance (setup.sh's module_ssl) and renewal
