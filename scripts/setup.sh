@@ -167,9 +167,15 @@ module_ssl_selfsigned() {
         # SAN list from NGINX_SERVER_NAME (set by module_network, which
         # always runs before this) so every way this box is reachable is
         # covered; fall back to localhost if it's somehow still unset.
-        local server_name entry san_entries=""
+        local server_name entry san_entries="" openssl_err
         server_name=$(get_env_var NGINX_SERVER_NAME)
         server_name=${server_name:-localhost}
+        # NGINX_SERVER_NAME is meant to be space-separated, but its sibling
+        # ALLOWED_HOSTS is comma-separated - a manual .env edit that copies
+        # the wrong convention (as happened once already) leaves a
+        # comma-joined entry with no DNS:/IP: prefix, which openssl rejects
+        # outright. Normalize commas to spaces so either delimiter works.
+        server_name=${server_name//,/ }
         for entry in $server_name; do
             if [[ "$entry" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
                 san_entries="${san_entries}IP:$entry,"
@@ -178,11 +184,22 @@ module_ssl_selfsigned() {
             fi
         done
         san_entries=${san_entries%,}
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+
+        if ! openssl_err=$(openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
           -keyout nginx/certs/server.key \
           -out nginx/certs/server.crt \
           -subj "/C=PL/ST=PPL/L=Trasa/O=PPL_Server/CN=localhost" \
-          -addext "subjectAltName=$san_entries" 2>/dev/null
+          -addext "subjectAltName=$san_entries" 2>&1); then
+            rm -f nginx/certs/server.crt nginx/certs/server.key
+            msg_err "Generowanie certyfikatu nie powiodło się: $openssl_err"
+            return 1
+        fi
+        if ! openssl x509 -in nginx/certs/server.crt -noout -text >/dev/null 2>&1; then
+            rm -f nginx/certs/server.crt nginx/certs/server.key
+            msg_err "Wygenerowany certyfikat nie przeszedł walidacji (openssl x509 nie potrafi go odczytać) - usunięto niepoprawny plik."
+            return 1
+        fi
+
         msg_succ "Certyfikaty zapisane w nginx/certs/ (SAN: $san_entries)."
     else
         msg_succ "Certyfikaty self-signed już istnieją, pomijam. (Usuń nginx/certs/server.crt, aby wygenerować nowe.)"
@@ -249,7 +266,10 @@ module_ssl() {
     # challenge can succeed (nginx must already be listening on 443 with a
     # valid cert for the HTTP-01 flow in issue_letsencrypt_cert to run), and
     # it's the automatic fallback if issuance/renewal ever fails.
-    module_ssl_selfsigned
+    if ! module_ssl_selfsigned; then
+        msg_err "Konfiguracja SSL przerwana - certyfikat self-signed nie został wygenerowany."
+        return 1
+    fi
 
     env_type=$(get_env_var ENV_TYPE)
     domain=$(get_env_var DOMAIN_NAME)
@@ -794,9 +814,9 @@ show_menu() {
 
     case "$menu_choice" in
         1) run_full_setup ;;
-        2) module_ssl; module_apply; maybe_issue_letsencrypt_cert ;;
+        2) module_ssl && module_apply && maybe_issue_letsencrypt_cert ;;
         3) module_versioning; module_apply --pull ;;
-        4) module_network; module_ssl; module_apply; maybe_issue_letsencrypt_cert ;;
+        4) module_network; module_ssl && module_apply && maybe_issue_letsencrypt_cert ;;
         5) module_smtp; module_apply ;;
         6) module_database; module_apply ;;
         7) module_backups; module_apply ;;
