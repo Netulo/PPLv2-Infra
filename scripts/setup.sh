@@ -648,6 +648,41 @@ module_rodo() {
     fi
 }
 
+module_2fa() {
+    msg_header "Zaufane urządzenia (2FA)"
+    CURRENT_TRUST=$(get_env_var TRUSTED_DEVICE_DAYS)
+    [ -n "$CURRENT_TRUST" ] && msg_info "Obecna wartość: $CURRENT_TRUST dni"
+
+    echo "Ile dni ma być zapamiętana przeglądarka po zaznaczeniu \"Zapamiętaj to urządzenie\""
+    echo "przy logowaniu z kodem 2FA (przez ten czas kod nie będzie ponownie wymagany):"
+    echo "1) 1 dzień"
+    echo "2) 7 dni"
+    echo "3) 30 dni (standard)"
+    echo "4) Niestandardowa liczba dni"
+    read -p "Wybierz [1/2/3/4] (Domyślnie 3): " trust_choice < /dev/tty
+    trust_choice=${trust_choice:-3}
+
+    case $trust_choice in
+        1) TRUST_DAYS=1 ;;
+        2) TRUST_DAYS=7 ;;
+        4)
+            read -p "Ilość dni: " custom_trust_days < /dev/tty
+            if ! [[ "$custom_trust_days" =~ ^[0-9]+$ ]] || [ "$custom_trust_days" -lt 1 ]; then
+                msg_warn "Błędna wartość. Ustawiono 30 dni."
+                TRUST_DAYS=30
+            else
+                TRUST_DAYS=$custom_trust_days
+            fi
+            ;;
+        *) TRUST_DAYS=30 ;;
+    esac
+
+    ensure_section "# --- 2FA ---"
+    set_env_var TRUSTED_DEVICE_DAYS "$TRUST_DAYS"
+    msg_succ "Zaufanie urządzenia: $TRUST_DAYS dni."
+    msg_info "Zmiana zacznie obowiązywać dopiero po restarcie kontenera web (opcja 'Zastosuj zmiany' w menu)."
+}
+
 module_updates() {
     msg_header "Automatyczne aktualizacje obrazów (Watchtower)"
 
@@ -810,6 +845,7 @@ run_full_setup() {
     module_database
     module_backups
     module_rodo
+    module_2fa
     module_updates
     module_docker_start
 }
@@ -828,10 +864,11 @@ show_menu() {
     echo " 6) Baza danych"
     echo " 7) Kopie zapasowe (Backups)"
     echo " 8) Retencja danych (RODO)"
-    echo " 9) Automatyczne aktualizacje (Watchtower)"
-    echo "10) Zastosuj zmiany / restart kontenerów"
-    echo "11) Backup kluczy .env (ODDZIELNIE od backupów bazy danych)"
-    echo "12) Eksport backupów bazy danych na pendrive/dysk zewnętrzny"
+    echo " 9) Zaufane urządzenia (2FA)"
+    echo "10) Automatyczne aktualizacje (Watchtower)"
+    echo "11) Zastosuj zmiany / restart kontenerów"
+    echo "12) Backup kluczy .env (ODDZIELNIE od backupów bazy danych)"
+    echo "13) Eksport backupów bazy danych na pendrive/dysk zewnętrzny"
     echo " 0) Wyjście"
     read -p "Wybierz opcję: " menu_choice < /dev/tty
 
@@ -844,13 +881,14 @@ show_menu() {
         6) module_database; module_apply ;;
         7) module_backups; module_apply ;;
         8) module_rodo; module_apply ;;
-        9) module_updates; module_apply --pull ;;
-        10) module_apply --pull ;;
-        11)
+        9) module_2fa; module_apply ;;
+        10) module_updates; module_apply --pull ;;
+        11) module_apply --pull ;;
+        12)
             read -p "Ścieżka docelowa (NIE ta sama co backupy bazy danych): " env_backup_dest < /dev/tty
             bash scripts/export_env_backup.sh "$env_backup_dest"
             ;;
-        12)
+        13)
             read -p "Ścieżka docelowa (pendrive/dysk zewnętrzny): " backups_export_dest < /dev/tty
             bash scripts/export_backups.sh "$backups_export_dest"
             ;;
