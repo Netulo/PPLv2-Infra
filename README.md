@@ -4,17 +4,16 @@ PPLv2 is a modular, Django-based web application built to manage the logistics, 
 
 It is designed to be deployed either on a local network (field server) or a public cloud, replacing paper-based processes with a secure, GDPR-compliant digital workflow.
 
-## 📦 Core Modules
+## 📦 What this deploys
 
-The system is split into independent Django apps handling specific domain logic:
-
-* **`pilgrims`**: Core registration. Handles personal data, PESEL/ID-based smart search, payment tracking, and GDPR consent logging.
-* **`vehicles`**: Issues and tracks car passes, driver details, and parking fees.
-* **`accommodations`**: Manages host allocations, capacity tracking, and overnight stay logistics.
-* **`meals`**: Tracks dietary requirements, daily menus, and meal orders.
-* **`homecoming`**: Bus ticket reservation system. Features strict capacity limits, overbooking prevention, and automated waitlist handling.
-* **`reports` & `dashboard`**: Real-time analytics, financial summaries, and a volunteer feedback system.
-* **`accounts`**: Custom user model and Role-Based Access Control (RBAC). Ensures volunteers only see the data relevant to their specific duty.
+This repo has no application code of its own — it's the installer for
+**PPLv2**, a Django application that runs a walking pilgrimage's
+registration, payments, vehicle passes, meals, accommodation,
+bus/homecoming logistics, and reporting. For what the application
+actually does — its modules, features, and how roles/permissions apply to
+each — see the [PPLv2-App README](https://github.com/Netulo/PPLv2-App#readme)
+and its `docs/ARCHITECTURE.md`. What follows here is the deployment
+surface: how the app is packaged, installed, updated, and kept backed up.
 
 ## 🛠 Tech Stack
 
@@ -24,6 +23,17 @@ The system is split into independent Django apps handling specific domain logic:
 * **Frontend**: Bootstrap 5, Vanilla JS, TomSelect, Flatpickr
 * **Infrastructure**: Docker, Docker Compose, Nginx, Gunicorn
 * **Image Distribution:** GitHub Container Registry (GHCR)
+
+### Containers (`docker-compose.yml`)
+
+| Service | Role |
+|---|---|
+| `web` | The application image (`ghcr.io/netulo/pplv2:${APP_VERSION}`, `stable` or `beta` channel). On every start, an entrypoint applies pending migrations and collects static files before serving traffic. |
+| `db` | PostgreSQL 15. Skipped if `module_database` was configured to use an external database instead. |
+| `redis` | Cache, sessions, and rate-limiting backend. |
+| `nginx` | Terminates 80/443, serves static files, holds the rendered config from `./nginx`. |
+| `certbot` | Not a persistent process — invoked on demand (`docker compose run --rm certbot ...`) to issue/renew the Let's Encrypt certificate. Shows `Exited (0)` after `docker compose up -d`; that's expected. |
+| `watchtower` | Opt-in auto-updater (`module_updates`), off by default — only started when the `auto-update` Compose profile is enabled. |
 
 ## 🔒 Security & GDPR (RODO) Compliance
 
@@ -139,6 +149,15 @@ All services are managed via Docker Compose. Main commands (executed in the `/op
   `docker compose exec web python manage.py createsuperuser`
 * **Enter the database shell:**
   `docker compose exec db psql -U pplv2_user -d pplv2_db`
+* **Check whether the server is up to date** (this repo, the `web` image,
+  and Watchtower, in one pass instead of checking each by hand):
+  `bash scripts/status.sh`
+* **Migrate an old (pre-PPLv2) database export into this system:**
+  `bash scripts/import_pilgrims.sh <folder-with-legacy-CSV-export>` — copies
+  the export into the `web` container, runs the legacy `import_pilgrims`
+  command, then deletes the in-container copy. The host-side copy you
+  point it at is real PESEL/PII data and is **not** deleted automatically;
+  remove it yourself once the import is verified.
 
 ---
 
@@ -150,7 +169,7 @@ During installation, the wizard configures CRON tasks directly in the operating 
 * **Session Cleanup:** Regular removal of expired access tokens.
 
 Need a copy on a USB drive/external disk (e.g. before a risky operation)?
-Run `scripts/export_backups.sh <destination>` (or menu option 12) — it reads
+Run `scripts/export_backups.sh <destination>` (or menu option 13) — it reads
 directly from the host's `./backups` folder, since a USB mount point isn't
 visible from inside the `web` container.
 
@@ -159,7 +178,7 @@ visible from inside the `web` container.
 backups above — if a copy of `.env` ever ended up in the same place as those
 backups, anyone who stole that one location would get both the encrypted
 data and the key to read it. Right after setup generates these keys, run
-`scripts/export_env_backup.sh <destination>` (or menu option 11 in
+`scripts/export_env_backup.sh <destination>` (or menu option 12 in
 `setup.sh`) and store the result somewhere the database backup pipeline has
 no access to (password manager, safe, separate storage account) — never the
 same GCS bucket or drive.

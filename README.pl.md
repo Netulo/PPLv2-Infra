@@ -4,26 +4,38 @@ PPLv2 to modułowa aplikacja internetowa oparta na frameworku Django, stworzona 
 
 System jest przystosowany do wdrożenia zarówno w sieci lokalnej (serwer w trasie), jak i w chmurze publicznej. Jego głównym celem jest cyfryzacja i automatyzacja procesów papierowych, przy jednoczesnym zachowaniu pełnej zgodności z RODO.
 
-## 📦 Główne Moduły
+## 📦 Co jest tu wdrażane
 
-System podzielony jest na niezależne aplikacje Django, odpowiadające za konkretne domeny logiczne:
-
-* **`pilgrims` (Pielgrzymi)**: Rdzeń systemu. Obsługuje rejestrację, inteligentne wyszukiwanie po PESEL/ID, śledzenie płatności oraz logowanie zgód RODO.
-* **`vehicles` (Pojazdy)**: Wydawanie przepustek samochodowych, zarządzanie danymi kierowców i opłatami.
-* **`accommodations` (Noclegi)**: Przydział kwater, śledzenie pojemności baz noclegowych i logistyka.
-* **`meals` (Posiłki)**: Zarządzanie dziennym jadłospisem i wydawaniem porcji.
-* **`homecoming` (Powroty)**: Rezerwacja biletów autokarowych. Posiada ścisłe limity miejsc, blokadę "overbookingu" oraz automatyczną listę rezerwową.
-* **`reports` & `dashboard` (Raporty)**: Analityka w czasie rzeczywistym, podsumowania finansowe oraz system opinii (feedback) dla wolontariuszy.
-* **`accounts` (Konta)**: Rozbudowany model użytkownika oparty o RBAC (Role-Based Access Control). Gwarantuje, że wolontariusze mają dostęp tylko do danych niezbędnych do wykonania ich zadania.
+To repozytorium nie ma własnego kodu aplikacji — jest instalatorem dla
+**PPLv2**, aplikacji Django obsługującej rejestrację, płatności,
+przepustki samochodowe, posiłki, noclegi, logistykę powrotów autokarami
+oraz raportowanie dla dużej pieszej pielgrzymki. Pełny opis tego, co
+aplikacja faktycznie robi — jej moduły, funkcjonalności i to, jak stosują
+się do nich role/uprawnienia — jest w
+[README repozytorium PPLv2-App](https://github.com/Netulo/PPLv2-App#readme)
+oraz w jego `docs/ARCHITECTURE.md`. To, co następuje niżej, dotyczy samej
+warstwy wdrożeniowej: jak aplikacja jest pakowana, instalowana,
+aktualizowana i zabezpieczana kopiami zapasowymi.
 
 ## 🛠 Technologie
 
-* **Backend**: Python 3.11, Django 5.x
+* **Backend**: Python 3.11, Django 5.2
 * **Baza danych**: PostgreSQL 15
 * **Cache i Limitowanie zapytań**: Redis (Alpine)
 * **Frontend**: Bootstrap 5, Vanilla JS, TomSelect, Flatpickr
 * **Infrastruktura**: Docker, Docker Compose, Nginx, Gunicorn
 * **Dystrybucja Obrazów:** GitHub Container Registry (GHCR)
+
+### Kontenery (`docker-compose.yml`)
+
+| Usługa | Rola |
+|---|---|
+| `web` | Obraz aplikacji (`ghcr.io/netulo/pplv2:${APP_VERSION}`, kanał `stable` lub `beta`). Przy każdym starcie skrypt wejściowy aplikuje oczekujące migracje i zbiera pliki statyczne, zanim aplikacja zacznie obsługiwać ruch. |
+| `db` | PostgreSQL 15. Pomijany, jeśli `module_database` skonfigurowano do użycia zewnętrznej bazy danych. |
+| `redis` | Backend dla cache, sesji i limitowania zapytań. |
+| `nginx` | Obsługuje porty 80/443, serwuje pliki statyczne, trzyma wyrenderowaną konfigurację z `./nginx`. |
+| `certbot` | Nie jest procesem trwałym — wywoływany na żądanie (`docker compose run --rm certbot ...`) do wydania/odnowienia certyfikatu Let's Encrypt. Po `docker compose up -d` pokazuje `Exited (0)` — to normalne. |
+| `watchtower` | Opcjonalny auto-aktualizator (`module_updates`), domyślnie wyłączony — startuje tylko gdy włączony jest profil Compose `auto-update`. |
 
 ## 🔒 Bezpieczeństwo i Zgodność z RODO
 
@@ -142,6 +154,16 @@ Wszystkie usługi zarządzane są przez narzędzie Docker Compose. Główne kome
   `docker compose exec web python manage.py createsuperuser`
 * **Wejście do powłoki (shell) bazy danych:**
   `docker compose exec db psql -U pplv2_user -d pplv2_db`
+* **Sprawdzenie, czy serwer jest aktualny** (to repozytorium, obraz `web`
+  i Watchtower — jednym poleceniem zamiast sprawdzania każdego z osobna):
+  `bash scripts/status.sh`
+* **Migracja starego (sprzed PPLv2) eksportu bazy danych do systemu:**
+  `bash scripts/import_pilgrims.sh <folder-z-eksportem-CSV>` — kopiuje
+  eksport do kontenera `web`, uruchamia historyczną komendę
+  `import_pilgrims`, po czym usuwa kopię wewnątrz kontenera. Kopia po
+  stronie hosta, którą wskazujesz jako argument, to prawdziwe dane
+  PESEL/PII i **nie** jest usuwana automatycznie — usuń ją ręcznie po
+  zweryfikowaniu importu.
 
 ---
 
@@ -153,7 +175,7 @@ Podczas instalacji kreator konfiguruje zadania CRON bezpośrednio w systemie ope
 * **Czyszczenie sesji:** Regularne usuwanie wygasłych tokenów dostępu
 
 Potrzebujesz kopii na pendrive/dysku zewnętrznym (np. przed ryzykowną
-operacją)? Uruchom `scripts/export_backups.sh <ścieżka>` (lub opcję 12 w
+operacją)? Uruchom `scripts/export_backups.sh <ścieżka>` (lub opcję 13 w
 menu) - czyta bezpośrednio z folderu `./backups` na hoście, bo ścieżka
 pendrive'a nie jest widoczna z wnętrza kontenera `web`.
 
@@ -162,7 +184,7 @@ pendrive'a nie jest widoczna z wnętrza kontenera `web`.
 backupach bazy danych - gdyby kopia `.env` trafiła w to samo miejsce co te
 backupy, ktoś kto ukradnie jedną lokalizację dostałby od razu zaszyfrowane
 dane i klucz do ich odczytania. Zaraz po tym, jak setup wygeneruje te klucze,
-uruchom `scripts/export_env_backup.sh <ścieżka>` (lub opcję 11 w menu
+uruchom `scripts/export_env_backup.sh <ścieżka>` (lub opcję 12 w menu
 `setup.sh`) i przechowuj wynik gdzieś, gdzie pipeline backupów bazy danych
 nie ma dostępu (menedżer haseł, sejf, oddzielne konto w chmurze) - nigdy w
 tym samym bucketcie GCS ani na tym samym dysku.
