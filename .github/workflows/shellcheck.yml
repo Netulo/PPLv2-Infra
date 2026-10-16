@@ -1,0 +1,25 @@
+name: ShellCheck
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # shellcheck is preinstalled on GitHub's ubuntu runners. Severity is
+      # warning (not style/info): the scripts currently have none at that
+      # level, so this blocks regressions without forcing a cleanup of
+      # ~40 "read without -r" style notes first.
+      - name: Lint scripts
+        run: shellcheck --severity=warning scripts/*.sh
+
+      - name: Syntax check
+        run: for f in scripts/*.sh; do bash -n "$f"; done
